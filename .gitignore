@@ -1,0 +1,37 @@
+# 大数据文件（全量表Excel，由用户每次提供，不入仓）
+*.xlsx
+*.xls
+*.csv
+
+# 中间数据
+data/
+*.pkl
+*.json
+
+# 脚本：只保留核心脚本，其余忽略
+scripts/*.py
+!scripts/match_cqb.py
+!scripts/run_plan2.py
+scripts/_*.pkl
+scripts/_*.txt
+
+# 旧版本/调试报告
+reports/_*.txt
+reports/_*.pkl
+
+# 临时文件
+*.tmp
+*.log
+__pycache__/
+*.pyc
+
+# 系统文件
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# 大体积第三方库
+scripts/echarts.min.js
+
+# PDF临时文件
+data/*.pdf
