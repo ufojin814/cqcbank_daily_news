@@ -9,10 +9,10 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 TARGET_BANKS = ['重庆农村商业银行','重庆三峡银行','重庆富民银行','重庆银行','成都银行','汉口银行','厦门银行','哈尔滨银行','广东南粤银行','大连银行']
 CQB = '重庆银行'
-REPORT_DIR = r'D:\理财信息周报项目\reports'
-DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (6).xlsx'
-DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (7).xlsx'
-BENCH_COL = '业绩比较基准（2026-10-01至2026-10-08）'
+REPORT_DIR = r'C:\Users\Administrator\WorkBuddy\2026-10-16-09-11-37\repo\reports'
+DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (8).xlsx'
+DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (10).xlsx'
+BENCH_COL = '业绩比较基准（2026-10-10至2026-10-16）'
 FIN_SUBS = ['宁银理财','招银理财','农银理财','杭银理财','华夏理财','北银理财','光大理财']
 LOCAL_BANKS = ['重庆三峡银行','重庆农村商业银行','重庆富民银行']
 OTHER_BANKS = ['成都银行','汉口银行','厦门银行','哈尔滨银行','广东南粤银行','大连银行']
@@ -75,14 +75,23 @@ df = df.dropna(subset=['产品名称']).reset_index(drop=True)
 df['销售机构']=df['代销机构'].apply(get_main_bank)
 df=df[df['销售机构'].isin(TARGET_BANKS)].copy()
 
+# 【覆盖修正】表2/表3 候选池用"含任一目标银行"的完整行集：
+#   上面按"单一主机构(get_main_bank)"过滤，会因一行同时被多家目标行代销、
+#   而第一家是重庆银行时把该行整行剔除，导致其他代销行(汉口/大连/哈尔滨/南粤等)连带丢失。
+#   故此处在替换重庆银行之前先留一份完整候选池，供表2/表3使用（表1仍只用按清单匹配的重庆银行行）。
+df_share_pool = df.copy()
+
 # 重庆银行替换为新清单匹配到的
-cqb_matched = pd.read_pickle(r'D:\理财信息周报项目\scripts\_cqb_matched.pkl')
+cqb_matched = pd.read_pickle(r'C:\Users\Administrator\WorkBuddy\2026-10-16-09-11-37\repo\scripts\_cqb_matched.pkl')
 cqb_matched['销售机构']=CQB
 df = pd.concat([df[df['销售机构']!=CQB], cqb_matched], ignore_index=True)
 print(f'总表: {len(df)}')
 
 df['mid'],df['low'] = zip(*df[BENCH_COL].apply(parse_benchmark))
 df['is_num']=df['mid'].notna()
+
+# 表2/表3 候选池同步解析业绩基准（该池在替换重庆银行前留存，需单独计算 mid/low）
+df_share_pool['mid'],df_share_pool['low'] = zip(*df_share_pool[BENCH_COL].apply(parse_benchmark))
 
 # 重庆银行各类型基准（最高2只代表的最高中枢/下限）
 cqb_ref={}
@@ -144,53 +153,146 @@ def write_sheet(ws, rows_df, title):
 cqb_rows = df[df['销售机构']==CQB].sort_values('mid',ascending=False)
 print(f'表1重庆银行: {len(cqb_rows)}只')
 
-# 母份额筛选（表2表3用，表1不用）：分级份额类型为空或"总份额"（即母份额）
-mufen_mask = df['分级份额类型'].isna() | (df['分级份额类型'].astype(str).str.strip()=='总份额')
-df_mufen = df[mufen_mask].copy()
+# ===== 表2/表3 份额口径（最终版，2026-10-16）=====
+# 规则（依用户最终确认口径）：
+#   1) 产品登记编码 = 产品级配对键（同一产品的各子份额与总份额共享同一登记编码）。
+#   2) 母份额不展示：若某(产品, 银行)已有"子份额"数据，则该对的"总份额"行丢弃。
+#      —— 粒度取 (产品, 银行)，而非整个产品：某行仅以母份额记录该银行、其他银行才有子份额时，
+#         母份额行必须保留，否则会出现覆盖缺口（实测 90 个银行-产品对属此类）。
+#   3) 每行按其"代销机构"字段中包含的目标银行逐家展开（一行可对多家银行）。
+#   4) 份额归属可判定性：判断依据 = **该产品所有子份额行的"代销机构"字符串是否完全相同**。
+#      - 有差异 → 数据为"份额级"，该银行确实登记在该份额下 → 可按份额精确展示（见 5）。
+#      - 全同   → 数据为"产品级聚合"（发行方按产品级上报），无法判定该银行代销哪个份额。
+#      实测：1721 个(银行,产品)对中 1453 对(84%)该行只出现在 1 个子份额列表里（天然唯一）；
+#            175 对出现在多个份额且列表有差异；93 对出现在多个份额且列表全同（不可定位）。
+#   5) 份额级产品的多子份额收敛（对比逻辑，规范 四.5）：中枢+下限双高于重庆银行该类型基准的
+#      子份额"全部保留"；其余（未达标）子份额"只保留 1 款"（中枢最高）。
+#   6) 产品级聚合（无法定位份额归属）且该组有多个子份额 → **改用母份额(总份额)只展示 1 行**；
+#      若该产品无母份额行 → 退化为挑 1 款子份额（优先高于重庆银行者，其次中枢最高）。
+#   7) 重庆银行不参与本口径（表1按在售清单原样保留全部份额）。
+OTHER_ALL = LOCAL_BANKS + OTHER_BANKS
 
-# 兜底：没有母份额只有子份额的产品，取A类或第一个子份额作为代表
-def get_base_code(code):
-    """去掉银行产品编码末尾单个大写字母（份额标识），得到产品基础代码"""
-    if pd.isna(code): return ''
-    s=str(code).strip()
-    return re.sub(r'[A-Z]$', '', s)
+def _tier_of(row):
+    return str(row.get('分级份额类型', '')).strip()
 
-mufen_base_codes = set(df_mufen['银行产品编码'].apply(get_base_code))
-sub_df = df[~mufen_mask & (df['分级份额类型'].astype(str).str.strip()=='子份额')].copy()
-sub_df['_base'] = sub_df['银行产品编码'].apply(get_base_code)
-sub_no_mufen = sub_df[~sub_df['_base'].isin(mufen_base_codes)].copy()
-# 按基础代码分组，优先取A类（代码末尾为A），否则取第一个
-backup_rows=[]
-for base, grp in sub_no_mufen.groupby('_base'):
-    a_rows = grp[grp['银行产品编码'].astype(str).str.strip().str.endswith('A')]
-    if len(a_rows):
-        backup_rows.append(a_rows.iloc[0])
+def _banks_of(row):
+    return [b for b in get_all_target_banks(row.get('代销机构', ''), exclude=CQB)
+            if b in OTHER_ALL]
+
+def _qualifies(row):
+    """对比逻辑（规范四.5）：同产品类型内，中枢且下限双高于重庆银行该类型基准。"""
+    ref = cqb_ref.get(row.get('运作子模式'))
+    if not ref:
+        return False
+    if pd.isna(row.get('mid')) or pd.isna(row.get('low')):
+        return False
+    return row['mid'] > ref[0] and row['low'] > ref[1]
+
+# 产品"代销机构"字段粒度判定：该产品所有子份额行的代销机构字符串是否全同
+#   True  = 产品级聚合（发行方按产品级上报）-> 无法判定该银行代销哪个份额
+#   False = 份额级（各份额列表有差异）-> 可用于定位份额
+_agg_key = {}
+for _k, _sub in df_share_pool[df_share_pool['分级份额类型'].astype(str).str.strip() == '子份额'].groupby('产品登记编码'):
+    _agg_key[str(_k)] = (_sub['代销机构'].astype(str).nunique() == 1)
+
+# 母份额(总份额)行索引：(产品登记编码, 银行) -> 母份额行（供"无法定位份额归属"时展示 1 行）
+zong_lookup = {}
+for _, row in df_share_pool.iterrows():
+    if _tier_of(row) != '总份额':
+        continue
+    pkey = str(row.get('产品登记编码'))
+    for b in _banks_of(row):
+        zong_lookup[(pkey, b)] = row
+
+# 第一步：逐行按代销机构展开到目标银行（(产品,银行)已有子份额时丢弃该对的母份额）
+zi_pairs = set()   # (产品登记编码, 银行) 已存在子份额
+for _, row in df_share_pool.iterrows():
+    if _tier_of(row) != '子份额':
+        continue
+    pkey = str(row.get('产品登记编码'))
+    for b in _banks_of(row):
+        zi_pairs.add((pkey, b))
+
+step1 = []
+for _, row in df_share_pool.iterrows():
+    tier = _tier_of(row)
+    if tier not in ('子份额', '不分份额', '总份额'):
+        continue
+    banks = _banks_of(row)
+    if not banks:
+        continue
+    pkey = str(row.get('产品登记编码'))
+    for b in banks:
+        if tier == '总份额' and (pkey, b) in zi_pairs:
+            continue   # 该产品对该行已有精确子份额 -> 丢弃母份额
+        r = row.copy()
+        r['销售机构'] = b
+        step1.append(r)
+
+# 第二步：按 (销售机构, 产品登记编码) 收敛
+#   组内有子份额 → 只在子份额中挑；否则用组内全部（不分份额/总份额）。
+#   口径（2026-10-16 修订）：高于重庆银行同类型基准的子份额"全部保留"；
+#   其余（未达标）子份额"只保留 1 款"（中枢最高）；组内全不达标时同样只留 1 款。
+_groups = {}
+for r in step1:
+    _groups.setdefault((r['销售机构'], str(r.get('产品登记编码'))), []).append(r)
+
+def _score(r):
+    return (r['mid'] if pd.notna(r.get('mid')) else -1e9,
+            r['low'] if pd.notna(r.get('low')) else -1e9)
+
+final_rows = []
+_n_grp_multi = 0
+_n_keep_hi = 0
+_n_keep_one = 0        # 非达标子份额收敛为 1 款
+_n_keep_fallback = 0   # 组内全不达标，留 1 款
+_n_use_zong = 0        # 无法定位份额归属 -> 改用母份额 1 行
+_n_no_mother = 0       # 无法定位但无母份额 -> 挑 1 款子份额
+for (bank, pkey), grp in _groups.items():
+    sub = [r for r in grp if _tier_of(r) == '子份额']
+    cand = sub if sub else grp          # 有子份额只在子份额中挑；否则用组内全部
+    if len(grp) > 1:
+        _n_grp_multi += 1
+    # 产品级聚合（无法定位份额归属）且该组有多个子份额 -> 用母份额只展示 1 行
+    if len(cand) > 1 and _agg_key.get(pkey, False):
+        z = zong_lookup.get((pkey, bank))
+        if z is not None:
+            zr = z.copy()
+            zr['销售机构'] = bank
+            final_rows.append(zr)
+            _n_use_zong += 1
+        else:
+            final_rows.append(max([r for r in cand if _qualifies(r)] or cand, key=_score))
+            _n_no_mother += 1
+        continue
+    hi = [r for r in cand if _qualifies(r)]
+    lo = [r for r in cand if not _qualifies(r)]
+    if hi:
+        if len(cand) > 1:
+            _n_keep_hi += 1
+        final_rows.extend(hi)           # 高于重庆银行同类型基准的子份额：全部保留
+        if lo:
+            _n_keep_one += 1
+            final_rows.append(max(lo, key=_score))   # 其余子份额：只保留 1 款
     else:
-        backup_rows.append(grp.iloc[0])
-if backup_rows:
-    df_backup = pd.DataFrame(backup_rows).drop(columns=['_base'], errors='ignore')
-    df_mufen = pd.concat([df_mufen, df_backup], ignore_index=True)
-print(f'母份额: {len(df[mufen_mask])}只, 兜底子份额: {len(backup_rows)}只, 合计表2表3用: {len(df_mufen)}只')
+        if len(cand) > 1:
+            _n_keep_fallback += 1
+        final_rows.append(max(cand, key=_score))
 
-def expand_by_bank(data, bank_list, exclude=CQB):
-    """按代销机构展开：一只产品被多家银行代销时，每家银行各占一行"""
-    expanded=[]
-    for _, row in data.iterrows():
-        banks = get_all_target_banks(row.get('代销机构',''), exclude=exclude)
-        banks = [b for b in banks if b in bank_list]
-        for b in banks:
-            r = row.copy()
-            r['销售机构'] = b
-            expanded.append(r)
-    if not expanded: return pd.DataFrame(columns=data.columns)
-    return pd.DataFrame(expanded)
+all_share_rows = pd.DataFrame(final_rows) if final_rows else pd.DataFrame(columns=df.columns)
+_tv = all_share_rows['分级份额类型'].astype(str).str.strip()
+_n_zi = int((_tv == '子份额').sum()); _n_bu = int((_tv == '不分份额').sum()); _n_zong = int((_tv == '总份额').sum())
+print(f'表2表3 份额口径: 展开={len(step1)}行 -> 收敛后={len(all_share_rows)}行 '
+      f'(子份额={_n_zi}, 不分份额={_n_bu}, 总份额={_n_zong})')
+print(f'  多份额组={_n_grp_multi}; 含达标行组={_n_keep_hi}; 非达标收敛1款={_n_keep_one}; 全低留1款={_n_keep_fallback}')
+print(f'  无法定位份额->用母份额1行={_n_use_zong}; 无母份额->挑1款={_n_no_mother}')
 
-# 表2：重庆本土银行（三峡银行、重庆农商行、富民银行）自营及代销，排除重庆银行，仅母份额，按代销机构展开
-loc_rows = expand_by_bank(df_mufen, LOCAL_BANKS).sort_values(['销售机构','mid'],ascending=[True,False])
+# 表2：重庆本土银行（三峡银行、重庆农商行、富民银行）自营及代销，排除重庆银行
+loc_rows = all_share_rows[all_share_rows['销售机构'].isin(LOCAL_BANKS)].sort_values(['销售机构','mid'],ascending=[True,False])
 print(f'表2本土银行: {len(loc_rows)}只')
 
-# 表3：其他在渝销售城商行（成都、汉口、厦门、哈尔滨、南粤、大连）代销，排除重庆银行，仅母份额，按代销机构展开
-oth_rows = expand_by_bank(df_mufen, OTHER_BANKS).sort_values(['销售机构','发行机构','mid'],ascending=[True,True,False])
+# 表3：其他在渝销售城商行（成都、汉口、厦门、哈尔滨、南粤、大连）代销，排除重庆银行
+oth_rows = all_share_rows[all_share_rows['销售机构'].isin(OTHER_BANKS)].sort_values(['销售机构','发行机构','mid'],ascending=[True,True,False])
 print(f'表3其他城商行: {len(oth_rows)}只')
 
 # 生成Excel
