@@ -9,10 +9,12 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 TARGET_BANKS = ['重庆农村商业银行','重庆三峡银行','重庆富民银行','重庆银行','成都银行','汉口银行','厦门银行','哈尔滨银行','广东南粤银行','大连银行']
 CQB = '重庆银行'
-REPORT_DIR = r'C:\Users\Administrator\WorkBuddy\2026-10-16-09-11-37\repo\reports'
-DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (8).xlsx'
-DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (10).xlsx'
-BENCH_COL = '业绩比较基准（2026-10-10至2026-10-16）'
+REPORT_DIR = r'D:\理财信息周报项目\reports'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PKL_PATH = os.path.join(BASE_DIR, '_cqb_matched.pkl')
+DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询.xlsx'
+DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (1).xlsx'
+BENCH_COL = '业绩比较基准（2026-10-26至2026-10-30）'
 FIN_SUBS = ['宁银理财','招银理财','农银理财','杭银理财','华夏理财','北银理财','光大理财']
 LOCAL_BANKS = ['重庆三峡银行','重庆农村商业银行','重庆富民银行']
 OTHER_BANKS = ['成都银行','汉口银行','厦门银行','哈尔滨银行','广东南粤银行','大连银行']
@@ -82,7 +84,7 @@ df=df[df['销售机构'].isin(TARGET_BANKS)].copy()
 df_share_pool = df.copy()
 
 # 重庆银行替换为新清单匹配到的
-cqb_matched = pd.read_pickle(r'C:\Users\Administrator\WorkBuddy\2026-10-16-09-11-37\repo\scripts\_cqb_matched.pkl')
+cqb_matched = pd.read_pickle(PKL_PATH)
 cqb_matched['销售机构']=CQB
 df = pd.concat([df[df['销售机构']!=CQB], cqb_matched], ignore_index=True)
 print(f'总表: {len(df)}')
@@ -128,11 +130,12 @@ def write_sheet(ws, rows_df, title):
         if pd.notna(row.get('mid')):
             ws.cell(r,4,round(row['mid'],2)); ws.cell(r,5,round(row['low'],2))
         else:
-            t=str(row.get(BENCH_COL,'无') or '无')
+            bv=row.get(BENCH_COL)
+            t='无' if pd.isna(bv) or str(bv).strip()=='' else str(bv).strip()
             ws.cell(r,4,t); ws.cell(r,5,t)
         rv,rl=get_return(row); dv,dl=get_dd(row)
-        ws.cell(r,6, f'{round(rv,2)}({rl})' if rv and rl!='近1年' else (round(rv,2) if rv else '无'))
-        ws.cell(r,7, f'{round(dv,2)}({dl})' if dv and dl!='近1年' else (round(dv,2) if dv else '无'))
+        ws.cell(r,6, '无' if rv is None else (f'{round(rv,2)}({rl})' if rl!='近1年' else round(rv,2)))
+        ws.cell(r,7, '无' if dv is None else (f'{round(dv,2)}({dl})' if dl!='近1年' else round(dv,2)))
         ws.cell(r,8,row.get('运作子模式',''))
         # 标红：同类型双高
         st=row.get('运作子模式','')

@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
 """重庆银行产品匹配：精确代码 + 模糊名称（统一全半角括号、去份额后缀）"""
+import os
 import pandas as pd
 import re
 
-DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (8).xlsx'
-DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (10).xlsx'
-NEW_LIST = r'D:\xwechat_files\wxid_dvo0b2wrw65x22_105f\temp\RWTemp\2026-10\92d32b52f7a24bcef41129f604b577ac\代销理财当前在售清单（2026.10.15）xlsx.xlsx'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PKL_PATH = os.path.join(BASE_DIR, '_cqb_matched.pkl')
+
+DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询.xlsx'
+DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (1).xlsx'
+NEW_LIST = r'D:\理财信息周报项目\data\代销理财当前在售清单（2026.10.30）.xlsx'
 
 print('读全量表...')
 df = pd.concat([pd.read_excel(DATA1, header=1), pd.read_excel(DATA2, header=1)], ignore_index=True)
@@ -87,5 +91,5 @@ matched_df = matched_df.dropna(subset=['产品名称']).reset_index(drop=True)
 print(f'\n匹配到: {len(matched_df)}')
 print(f'缺失: {len(missing)}')
 print(f'缺失率: {len(missing)/len(new)*100:.1f}%')
-matched_df.to_pickle(r'C:\Users\Administrator\WorkBuddy\2026-10-16-09-11-37\repo\scripts\_cqb_matched.pkl')
-print('已保存')
+matched_df.to_pickle(PKL_PATH)
+print(f'已保存: {PKL_PATH}')
