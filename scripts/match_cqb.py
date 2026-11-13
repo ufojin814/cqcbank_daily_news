@@ -7,9 +7,9 @@ import re
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PKL_PATH = os.path.join(BASE_DIR, '_cqb_matched.pkl')
 
-DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询.xlsx'
-DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (1).xlsx'
-NEW_LIST = r'D:\理财信息周报项目\data\代销理财当前在售清单（2026.10.30）.xlsx'
+DATA1 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (4).xlsx'
+DATA2 = r'C:\Users\Administrator\Downloads\银行理财产品查询 (5).xlsx'
+NEW_LIST = r'D:\理财信息周报项目\data\代销理财当前在售清单（2026.11.13）.xlsx'
 
 print('读全量表...')
 df = pd.concat([pd.read_excel(DATA1, header=1), pd.read_excel(DATA2, header=1)], ignore_index=True)
